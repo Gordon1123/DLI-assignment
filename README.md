@@ -490,3 +490,61 @@ You try a small list of neighbor counts and pick the one that maximizes AP on th
     y_pred   = knn.predict(X_tst_p)
     y_scores = knn.predict_proba(X_tst_p)[:, 1]
 After choosing k, you re-fit the scaler and PCA on the combined train+val data, then train the final KNN and produce test-set predictions and probability scores for unbiased evaluation.
+
+## Metrics summary & diagnostic plots
+    # ---- Summary metrics ----
+    acc   = accuracy_score(y_test, y_pred)
+    auc_v = roc_auc_score(y_test, y_scores)
+    f1    = f1_score(y_test, y_pred)
+    
+    cm = confusion_matrix(y_test, y_pred)
+    tn, fp, fn, tp = cm.ravel()
+    far = fp / float(fp + tn)           # False Alarm Rate
+    dr  = tp / float(tp + fn)           # Detection Rate (Recall for class 1)
+    
+    print("\n=== PCA + KNN Evaluation ===")
+    print(f"Accuracy                 = {acc:.6f}")
+    print(f"AUC                      = {auc_v:.6f}")
+    print(f"False Alarm Rate (FAR)   = {far:.6f}")
+    print(f"Detection Rate (DR)      = {dr:.6f}")
+    print(f"F1 Score                 = {f1:.5f}\n")
+    print(classification_report(y_test, y_pred, digits=2))
+You report Accuracy, ROC-AUC (with scores), F1, False Alarm Rate (FP rate on benign URLs), and Detection Rate (recall on phishing). The classification_report gives per-class precision/recall/F1—useful to see trade-offs.
+    # ---- Confusion Matrix (graph) ----
+    plt.figure(figsize=(6,4))
+    plt.imshow(cm, interpolation="nearest", cmap="Blues")
+    plt.title("Confusion Matrix (PCA + KNN)")
+    plt.xlabel("Predicted"); plt.ylabel("Actual")
+    for (i, j), v in np.ndenumerate(cm):
+        plt.text(j, i, str(v), ha="center", va="center")
+    plt.colorbar(); plt.tight_layout(); plt.show()
+    
+    # ---- ROC Curve ----
+    fpr, tpr, _ = roc_curve(y_test, y_scores)
+    roc_auc = auc(fpr, tpr)
+    plt.figure(figsize=(7,5))
+    plt.plot(fpr, tpr, label=f"AUC = {roc_auc:.4f}")
+    plt.plot([0,1],[0,1], "--")
+    plt.xlabel("False Positive Rate"); plt.ylabel("True Positive Rate")
+    plt.title("ROC Curve (PCA + KNN)"); plt.legend(loc="lower right")
+    plt.tight_layout(); plt.show()
+    
+    # ---- Precision–Recall Curve ----
+    precision, recall, _ = precision_recall_curve(y_test, y_scores)
+    ap = average_precision_score(y_test, y_scores)
+    plt.figure(figsize=(7,5))
+    plt.plot(recall, precision, label=f"AP = {ap:.4f}")
+    plt.xlabel("Recall"); plt.ylabel("Precision")
+    plt.title("Precision–Recall Curve (PCA + KNN)")
+    plt.legend(loc="lower left"); plt.tight_layout(); plt.show()
+The confusion matrix shows counts, the ROC curve visualizes TPR vs FPR with AUC, and the PR curve highlights performance on the positive class with AP—particularly informative for class imbalance.
+
+## Threshold sweep for best F1
+    thr_candidates = np.linspace(np.percentile(y_scores, 5), np.percentile(y_scores, 95), 21)
+    best_f1, best_thr = -1, 0.5
+    for thr in thr_candidates:
+        f1_tmp = f1_score(y_test, (y_scores >= thr).astype(int))
+        if f1_tmp > best_f1:
+            best_f1, best_thr = f1_tmp, thr
+    print(f"Best F1 across thresholds: {best_f1:.4f} at threshold {best_thr:.4f}")
+Instead of always using a 0.5 cutoff, you probe a range of thresholds and report the one that maximizes F1. Use this when you prefer a different precision–recall balance.
