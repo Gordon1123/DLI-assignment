@@ -106,7 +106,7 @@ Standardization is learned only on training data (fit) and then applied to both 
     y = df['phishing'].values.astype(int)
 You import NumPy/pandas/matplotlib for data and plotting, scikit-learn for splitting, scaling, and metrics, and TensorFlow/Keras for the neural net. Then you load the cleaned CSV, split it into features X (all columns except phishing) and the binary target y (cast to int). Using the already-clean file avoids issues from NaNs/duplicates at the modeling stage.
 
-# Train/val/test split and scaling 
+## Train/val/test split and scaling 
 
     # ---- Split: train/val/test = 64% / 16% / 20% ----
     X_tmp, X_test, y_tmp, y_test = train_test_split(
@@ -125,7 +125,7 @@ You import NumPy/pandas/matplotlib for data and plotting, scikit-learn for split
 
 You first hold out 20% as a test set, then split the remaining 80% into train/validation (80/20 of that), yielding 64% train / 16% val / 20% test. stratify preserves the phishing/non-phishing ratio in every split. StandardScaler is fitted only on the training data to prevent leakage, and then applied to validation and test.
 
-# Model architecture & compilation
+## Model architecture & compilation
     # ---- Model ----
     model = models.Sequential([
         layers.Dense(128, activation='relu', input_shape=(X_train_s.shape[1],)),
@@ -143,7 +143,7 @@ You first hold out 20% as a test set, then split the remaining 80% into train/va
     )
 This is a simple feed-forward network: two ReLU hidden layers (128 → 64), batch-norm after the first, and dropout (0.2) for regularization. The final sigmoid outputs a probability for the positive class. You compile with Adam (1e-3), binary cross-entropy, and track accuracy plus ROC-AUC.
 
-# Callbacks and training loop
+## Callbacks and training loop
     # ---- Callbacks ----
     cbs = [
         tf.keras.callbacks.EarlyStopping(
@@ -165,7 +165,7 @@ This is a simple feed-forward network: two ReLU hidden layers (128 → 64), batc
     )
 Early stopping watches validation AUC and restores the best weights to avoid overfitting; ReduceLROnPlateau halves the learning rate if val-AUC stalls.It train up to 50 epochs with a fixed batch size of 64, using the validation split for on-the-fly feedback.
 
-# Evaluation metrics and summary printout
+## Evaluation metrics and summary printout
     # ---- Evaluate on test ----
     y_scores = model.predict(X_test_s).ravel()
     y_pred   = (y_scores >= 0.5).astype(int)
@@ -188,7 +188,7 @@ Early stopping watches validation AUC and restores the best weights to avoid ove
     print(classification_report(y_test, y_pred, digits=2))
 Predicted scores (probabilities) are thresholded at 0.5 to get class labels. You compute Accuracy, ROC-AUC (using scores), F1, the confusion matrix, False Alarm Rate (FP rate on negatives), and Detection Rate (recall on positives). classification_report prints precision/recall/F1 per class—useful if the dataset is imbalanced.
 
-# Visualization: confusion matrix, ROC, and PR curves
+## Visualization: confusion matrix, ROC, and PR curves
     # ---- Confusion Matrix ----
     plt.figure(figsize=(6,4))
     plt.imshow(cm, interpolation='nearest', cmap='Blues')
@@ -215,3 +215,48 @@ Predicted scores (probabilities) are thresholded at 0.5 to get class labels. You
     plt.xlabel("Recall"); plt.ylabel("Precision")
     plt.title("Precision–Recall Curve (NN)"); plt.legend(); plt.tight_layout(); plt.show()
 The confusion-matrix heatmap shows counts of TP/TN/FP/FN. The ROC curve plots TPR vs FPR with its AUC; the diagonal is random guessing. The Precision–Recall curve is especially informative for class imbalance; AP (Average Precision) summarizes area under the PR curve.
+
+# Random Forest Algorithm (RF)
+## Imports, config, and loading data
+
+    # ==========================
+    # Random Forest (RF) — Full Pipeline (Val sweep + Graphs)
+    # ==========================
+    import numpy as np
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    
+    from sklearn.model_selection import train_test_split
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.metrics import (
+        accuracy_score, roc_auc_score, confusion_matrix, classification_report, f1_score,
+        roc_curve, auc, precision_recall_curve, average_precision_score
+    )
+    
+    # ---- Config ----
+    FILE = "/content/drive/My Drive/Colab Notebooks/dataset_full_clean.csv"
+    TEST_SIZE = 0.20
+    VAL_SIZE_WITHIN_TRAIN = 0.20     # 20% of the train portion becomes validation
+    RANDOM_STATE = 42
+    CLASS_WEIGHT = "balanced"        # helps with class imbalance
+    
+    # ---- Load ----
+    df = pd.read_csv(FILE)
+    X = df.drop("phishing", axis=1)
+    y = df["phishing"].astype(int)
+You bring in NumPy/pandas/matplotlib, scikit-learn’s RF and metrics, and set run-time knobs (file path, split sizes, seed, and class_weight='balanced' to reduce class-imbalance bias). Then you load the cleaned dataset, split it into features X and integer target y (the phishing column).
+
+## Train/test split + internal validation split
+    # ---- Split into train/test ----
+    X_train_full, X_test, y_train_full, y_test = train_test_split(
+        X, y, test_size=TEST_SIZE, stratify=y, random_state=RANDOM_STATE
+    )
+    
+    # ---- Split train into train/val ----
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_train_full, y_train_full,
+        test_size=VAL_SIZE_WITHIN_TRAIN,
+        stratify=y_train_full,
+        random_state=RANDOM_STATE
+    )
+First you hold out a test set of 20% with stratification to preserve the class ratio. From the remaining training pool you carve out a validation set (20% of train), again stratified. That gives ~64% train, 16% validation, 20% test—clean separation for tuning (val) and final reporting (test).
