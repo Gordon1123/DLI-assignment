@@ -456,3 +456,37 @@ You import all tools, set run-time knobs (file path, split sizes, PCA dimension,
     print(f"PCA reduced features: {X.shape[1]} -> {X_train_p.shape[1]}")
     print(f"Total explained variance (sum): {pca.explained_variance_ratio_.sum():.4f}")
 You hold out 20% for test, then from the remaining data create a validation split for tuning. Standardization is essential for KNN distance calculations. PCA is fitted only on the standardized training set and applied to val/test, shrinking dimensionality to PCA_COMPONENTS and reporting the variance you kept—this speeds KNN and can reduce noise.
+
+## Validation sweep to choose k by Average Precision (AP)
+    # ---- Sweep k on validation to choose best by Average Precision (AP) ----
+    best_ap, best_k = -1.0, None
+    for k in K_LIST:
+        knn_val = KNeighborsClassifier(n_neighbors=k, weights=WEIGHTS)
+        knn_val.fit(X_train_p, y_train)
+        scores_val = knn_val.predict_proba(X_val_p)[:, 1]
+        ap_val = average_precision_score(y_val, scores_val)
+        print(f"k={k:2d}  |  Validation AP={ap_val:.4f}")
+        if ap_val > best_ap:
+            best_ap, best_k = ap_val, k
+    
+    print(f"\nChosen k (by best validation AP): {best_k}  (AP={best_ap:.4f})")
+You try a small list of neighbor counts and pick the one that maximizes AP on the validation set. AP summarizes the precision–recall curve, which is appropriate when phishing positives may be rarer than benigns.
+
+## Relearn transforms on Train+Val, train final KNN, and predict
+    # ---- Refit scaler & PCA on train+val, then train final KNN with best k ----
+    scaler_final = StandardScaler()
+    X_trv_s = scaler_final.fit_transform(pd.concat([X_train, X_val], axis=0))
+    X_tst_s = scaler_final.transform(X_test)
+    
+    pca_final = PCA(n_components=PCA_COMPONENTS, random_state=RANDOM_STATE)
+    X_trv_p = pca_final.fit_transform(X_trv_s)
+    X_tst_p = pca_final.transform(X_tst_s)
+    y_trv = pd.concat([y_train, y_val], axis=0)
+    
+    knn = KNeighborsClassifier(n_neighbors=best_k, weights=WEIGHTS)
+    knn.fit(X_trv_p, y_trv)
+    
+    # ---- Predictions on test ----
+    y_pred   = knn.predict(X_tst_p)
+    y_scores = knn.predict_proba(X_tst_p)[:, 1]
+After choosing k, you re-fit the scaler and PCA on the combined train+val data, then train the final KNN and produce test-set predictions and probability scores for unbiased evaluation.
