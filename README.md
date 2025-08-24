@@ -598,7 +598,7 @@ You import libraries, print the XGBoost version for reproducibility, load the cl
     }
 You convert data to XGBoost’s optimized DMatrix with readable feature names, compute a positive-class weight to mitigate class imbalance, and set sensible parameters with PR-AUC for evaluation, moderate depth, conservative learning rate, and fast histogram trees.
 
-# Training with early stopping and prediction
+## Training with early stopping and prediction
     evals = [(dtrain, "train"), (dvalid, "valid")]
     booster = xgb.train(
         params=params,
@@ -619,3 +619,76 @@ You convert data to XGBoost’s optimized DMatrix with readable feature names, c
     y_pred = (y_scores >= 0.5).astype(int)
 Training stops automatically when validation PR-AUC doesn’t improve for 50 rounds, selecting a good number of trees and reducing overfitting; predictions return probabilities that you threshold at 0.5 to get class labels.
 
+## Metrics summary
+    acc   = accuracy_score(y_test, y_pred)
+    auc_v = roc_auc_score(y_test, y_scores)
+    f1    = f1_score(y_test, y_pred)
+    
+    cm = confusion_matrix(y_test, y_pred)
+    tn, fp, fn, tp = cm.ravel()
+    far = fp / float(fp + tn)   # False Alarm Rate on benign
+    dr  = tp / float(tp + fn)   # Detection Rate (recall on phishing)
+    
+    print("\n=== XGBoost (native) Evaluation ===")
+    print(f"Accuracy                 = {acc:.6f}")
+    print(f"AUC                      = {auc_v:.6f}")
+    print(f"False Alarm Rate (FAR)   = {far:.6f}")
+    print(f"Detection Rate (DR)      = {dr:.6f}")
+    print(f"F1 Score                 = {f1:.5f}\n")
+    print(classification_report(y_test, y_pred, digits=2))
+You report Accuracy, ROC-AUC, F1, False Alarm Rate on benign samples, and Detection Rate on phishing samples; the classification report adds per-class precision, recall, and F1 to diagnose imbalance.
+
+## Visual diagnostics
+    # Confusion Matrix
+    plt.figure(figsize=(6,4))
+    plt.imshow(cm, interpolation="nearest", cmap="Blues")
+    plt.title("Confusion Matrix (XGBoost)")
+    plt.xlabel("Predicted"); plt.ylabel("Actual")
+    for (i, j), v in np.ndenumerate(cm):
+        plt.text(j, i, str(v), ha="center", va="center")
+    plt.colorbar(); plt.tight_layout(); plt.show()
+    
+    # ROC Curve
+    fpr, tpr, _ = roc_curve(y_test, y_scores)
+    roc_auc = auc(fpr, tpr)
+    plt.figure(figsize=(7,5))
+    plt.plot(fpr, tpr, label=f"AUC = {roc_auc:.4f}")
+    plt.plot([0,1],[0,1], "--")
+    plt.xlabel("False Positive Rate"); plt.ylabel("True Positive Rate")
+    plt.title("ROC Curve (XGBoost)"); plt.legend(loc="lower right")
+    plt.tight_layout(); plt.show()
+    
+    # Precision–Recall Curve
+    precision, recall, _ = precision_recall_curve(y_test, y_scores)
+    ap = average_precision_score(y_test, y_scores)
+    plt.figure(figsize=(7,5))
+    plt.plot(recall, precision, label=f"AP = {ap:.4f}")
+    plt.xlabel("Recall"); plt.ylabel("Precision")
+    plt.title("Precision–Recall Curve (XGBoost)")
+    plt.legend(loc="lower left"); plt.tight_layout(); plt.show()
+These plots visualize performance: the confusion matrix shows counts; the ROC shows TPR against FPR with AUC; the Precision–Recall curve and AP focus on the positive class and are often more informative when phishing is the minority.
+
+## Threshold Sweep and Feature Importances
+    # Best-F1 threshold search
+    thr_candidates = np.linspace(np.percentile(y_scores, 5), np.percentile(y_scores, 95), 21)
+    best_f1, best_thr = -1, 0.5
+    for thr in thr_candidates:
+        f1_tmp = f1_score(y_test, (y_scores >= thr).astype(int))
+        if f1_tmp > best_f1:
+            best_f1, best_thr = f1_tmp, thr
+    print(f"Best F1 across thresholds: {best_f1:.4f} at threshold {best_thr:.4f}")
+    
+    # Feature Importance (Gain)
+    gain_importance = booster.get_score(importance_type="gain")
+    if gain_importance:
+        feat_names = np.array(list(gain_importance.keys()))
+        feat_gain  = np.array([gain_importance[k] for k in feat_names], dtype=float)
+        order = np.argsort(feat_gain)[::-1][:20]
+        plt.figure(figsize=(8,8))
+        plt.barh(range(len(order)), feat_gain[order][::-1])
+        plt.yticks(range(len(order)), feat_names[order][::-1])
+        plt.title("Top 20 Feature Importances (Gain) — XGBoost")
+        plt.xlabel("Average Gain"); plt.tight_layout(); plt.show()
+    else:
+        print("No gain-based feature importance available.")
+You scan thresholds to find the one that maximizes F1, allowing you to tune the precision–recall trade-off; the gain-based importance chart highlights which features most improved splits, aiding interpretation and feature engineering.
