@@ -574,3 +574,48 @@ Instead of always using a 0.5 cutoff, you probe a range of thresholds and report
         X, y, test_size=0.20, stratify=y, random_state=42
     )
 You import libraries, print the XGBoost version for reproducibility, load the cleaned dataset, separate the features and labels, and create a stratified 80/20 train–test split to preserve the phishing ratio.
+
+## DMatrix, imbalance weight, parameters
+     # DMatrix (native API)
+    dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=X.columns.tolist())
+    dvalid = xgb.DMatrix(X_test,  label=y_test,  feature_names=X.columns.tolist())
+    dtest  = dvalid
+    
+    # Class imbalance weight
+    pos_weight = (y_train == 0).sum() / (y_train == 1).sum()
+    
+    # Params
+    params = {
+        "objective": "binary:logistic",
+        "eval_metric": "aucpr",
+        "max_depth": 6,
+        "eta": 0.05,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "scale_pos_weight": float(pos_weight),
+        "tree_method": "hist",
+        "seed": 42
+    }
+You convert data to XGBoost’s optimized DMatrix with readable feature names, compute a positive-class weight to mitigate class imbalance, and set sensible parameters with PR-AUC for evaluation, moderate depth, conservative learning rate, and fast histogram trees.
+
+# Training with early stopping and prediction
+    evals = [(dtrain, "train"), (dvalid, "valid")]
+    booster = xgb.train(
+        params=params,
+        dtrain=dtrain,
+        num_boost_round=2000,
+        evals=evals,
+        early_stopping_rounds=50,
+        verbose_eval=False
+    )
+    best_iter = getattr(booster, "best_iteration", None)
+    print(f"Best iteration: {best_iter if best_iter is not None else 'N/A'}")
+    
+    if hasattr(booster, "best_iteration") and booster.best_iteration is not None:
+        y_scores = booster.predict(dtest, iteration_range=(0, booster.best_iteration + 1))
+    else:
+        y_scores = booster.predict(dtest)
+    
+    y_pred = (y_scores >= 0.5).astype(int)
+Training stops automatically when validation PR-AUC doesn’t improve for 50 rounds, selecting a good number of trees and reducing overfitting; predictions return probabilities that you threshold at 0.5 to get class labels.
+
