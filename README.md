@@ -108,19 +108,110 @@ You import NumPy/pandas/matplotlib for data and plotting, scikit-learn for split
 
 # Train/val/test split and scaling 
 
-        # ---- Split: train/val/test = 64% / 16% / 20% ----
-        X_tmp, X_test, y_tmp, y_test = train_test_split(
-            X, y, test_size=0.20, stratify=y, random_state=42
-        )
-        X_train, X_val, y_train, y_val = train_test_split(
-            X_tmp, y_tmp, test_size=0.20, stratify=y_tmp, random_state=42
-        )
-        
-        # ---- Scale ----
-        scaler = StandardScaler()
-        X_train_s = scaler.fit_transform(X_train)
-        X_val_s   = scaler.transform(X_val)
-        X_test_s  = scaler.transform(X_test)
+    # ---- Split: train/val/test = 64% / 16% / 20% ----
+    X_tmp, X_test, y_tmp, y_test = train_test_split(
+        X, y, test_size=0.20, stratify=y, random_state=42
+    )
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_tmp, y_tmp, test_size=0.20, stratify=y_tmp, random_state=42
+    )
+    
+    # ---- Scale ----
+    scaler = StandardScaler()
+    X_train_s = scaler.fit_transform(X_train)
+    X_val_s   = scaler.transform(X_val)
+    X_test_s  = scaler.transform(X_test)
+
 
 You first hold out 20% as a test set, then split the remaining 80% into train/validation (80/20 of that), yielding 64% train / 16% val / 20% test. stratify preserves the phishing/non-phishing ratio in every split. StandardScaler is fitted only on the training data to prevent leakage, and then applied to validation and test.
 
+# Model architecture & compilation
+    # ---- Model ----
+    model = models.Sequential([
+        layers.Dense(128, activation='relu', input_shape=(X_train_s.shape[1],)),
+        layers.BatchNormalization(),
+        layers.Dropout(0.2),
+        layers.Dense(64, activation='relu'),
+        layers.Dropout(0.2),
+        layers.Dense(1, activation='sigmoid')
+    ])
+    
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),
+        loss='binary_crossentropy',
+        metrics=['accuracy', tf.keras.metrics.AUC(name='auc')]
+    )
+This is a simple feed-forward network: two ReLU hidden layers (128 → 64), batch-norm after the first, and dropout (0.2) for regularization. The final sigmoid outputs a probability for the positive class. You compile with Adam (1e-3), binary cross-entropy, and track accuracy plus ROC-AUC.
+
+# Callbacks and training loop
+    # ---- Callbacks ----
+    cbs = [
+        tf.keras.callbacks.EarlyStopping(
+            monitor='val_auc', mode='max', patience=8, restore_best_weights=True
+        ),
+        tf.keras.callbacks.ReduceLROnPlateau(
+            monitor='val_auc', mode='max', factor=0.5, patience=4, verbose=1
+        )
+    ]
+    
+    # ---- Train ----
+    history = model.fit(
+        X_train_s, y_train,
+        epochs=50,
+        batch_size=64,              # fixed; change if you like
+        validation_data=(X_val_s, y_val),
+        verbose=1,
+        callbacks=cbs
+    )
+Early stopping watches validation AUC and restores the best weights to avoid overfitting; ReduceLROnPlateau halves the learning rate if val-AUC stalls.It train up to 50 epochs with a fixed batch size of 64, using the validation split for on-the-fly feedback.
+
+# Evaluation metrics and summary printout
+    # ---- Evaluate on test ----
+    y_scores = model.predict(X_test_s).ravel()
+    y_pred   = (y_scores >= 0.5).astype(int)
+    
+    acc   = accuracy_score(y_test, y_pred)
+    auc_v = roc_auc_score(y_test, y_scores)
+    f1    = f1_score(y_test, y_pred)
+    
+    cm = confusion_matrix(y_test, y_pred)
+    tn, fp, fn, tp = cm.ravel()
+    far = fp / float(fp + tn)     # False Alarm Rate
+    dr  = tp / float(tp + fn)     # Detection Rate (recall for class 1)
+    
+    print("\n=== Neural Network Evaluation ===")
+    print(f"Accuracy                 = {acc:.6f}")
+    print(f"AUC                      = {auc_v:.6f}")
+    print(f"False Alarm Rate (FAR)   = {far:.6f}")
+    print(f"Detection Rate (DR)      = {dr:.6f}")
+    print(f"F1 Score                 = {f1:.5f}\n")
+    print(classification_report(y_test, y_pred, digits=2))
+Predicted scores (probabilities) are thresholded at 0.5 to get class labels. You compute Accuracy, ROC-AUC (using scores), F1, the confusion matrix, False Alarm Rate (FP rate on negatives), and Detection Rate (recall on positives). classification_report prints precision/recall/F1 per class—useful if the dataset is imbalanced.
+
+# Visualization: confusion matrix, ROC, and PR curves
+    # ---- Confusion Matrix ----
+    plt.figure(figsize=(6,4))
+    plt.imshow(cm, interpolation='nearest', cmap='Blues')
+    plt.title('Confusion Matrix (NN)')
+    plt.xlabel('Predicted'); plt.ylabel('Actual')
+    for (i, j), v in np.ndenumerate(cm):
+        plt.text(j, i, str(v), ha='center', va='center')
+    plt.colorbar(); plt.tight_layout(); plt.show()
+    
+    # ---- ROC ----
+    fpr, tpr, _ = roc_curve(y_test, y_scores)
+    roc_auc = auc(fpr, tpr)
+    plt.figure(figsize=(7,5))
+    plt.plot(fpr, tpr, label=f"AUC = {roc_auc:.4f}")
+    plt.plot([0,1],[0,1],'--')
+    plt.xlabel("False Positive Rate"); plt.ylabel("True Positive Rate")
+    plt.title("ROC Curve (NN)"); plt.legend(); plt.tight_layout(); plt.show()
+    
+    # ---- Precision–Recall ----
+    precision, recall, _ = precision_recall_curve(y_test, y_scores)
+    ap = average_precision_score(y_test, y_scores)
+    plt.figure(figsize=(7,5))
+    plt.plot(recall, precision, label=f"AP = {ap:.4f}")
+    plt.xlabel("Recall"); plt.ylabel("Precision")
+    plt.title("Precision–Recall Curve (NN)"); plt.legend(); plt.tight_layout(); plt.show()
+The confusion-matrix heatmap shows counts of TP/TN/FP/FN. The ROC curve plots TPR vs FPR with its AUC; the diagonal is random guessing. The Precision–Recall curve is especially informative for class imbalance; AP (Average Precision) summarizes area under the PR curve.
