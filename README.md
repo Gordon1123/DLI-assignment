@@ -260,3 +260,73 @@ You bring in NumPy/pandas/matplotlib, scikit-learn’s RF and metrics, and set r
         random_state=RANDOM_STATE
     )
 First you hold out a test set of 20% with stratification to preserve the class ratio. From the remaining training pool you carve out a validation set (20% of train), again stratified. That gives ~64% train, 16% validation, 20% test—clean separation for tuning (val) and final reporting (test).
+## Small validation sweep
+
+    # ---- Small validation sweep (optimize Average Precision on val) ----
+    param_grid = {
+        "n_estimators":     [200, 400, 600],
+        "max_depth":        [None, 12, 20],
+        "min_samples_leaf": [1, 3, 5],
+    }
+    
+    best = (-1.0, None, None)  # (AP, params, model)
+    for n in param_grid["n_estimators"]:
+        for d in param_grid["max_depth"]:
+            for m in param_grid["min_samples_leaf"]:
+                rf_val = RandomForestClassifier(
+                    n_estimators=n,
+                    max_depth=d,
+                    min_samples_leaf=m,
+                    class_weight=CLASS_WEIGHT,
+                    n_jobs=-1,
+                    random_state=RANDOM_STATE
+                )
+                rf_val.fit(X_train, y_train)
+                scores_val = rf_val.predict_proba(X_val)[:, 1]
+                ap_val = average_precision_score(y_val, scores_val)
+                print(f"n_estimators={n:4d} | max_depth={str(d):>4} | min_samples_leaf={m} -> Val AP={ap_val:.4f}")
+                if ap_val > best[0]:
+                    best = (ap_val, {"n_estimators": n, "max_depth": d, "min_samples_leaf": m}, rf_val)
+    
+    best_ap, best_params, _ = best
+    print(f"\nChosen params (by best validation AP={best_ap:.4f}): {best_params}")
+    
+You loop over a compact grid of RF hyperparameters and train on train, score on validation, and keep the combination that maximizes Average Precision (AP)—a PR-curve metric well-suited to imbalanced phishing data. This lightweight sweep avoids full grid-search overhead but still finds a good configuration.
+
+## Refit with the best params on train+val and predict on test
+    # ---- Refit on Train+Val with best params ----
+    X_trv = pd.concat([X_train, X_val], axis=0)
+    y_trv = pd.concat([y_train, y_val], axis=0)
+    
+    rf = RandomForestClassifier(
+        **best_params,
+        class_weight=CLASS_WEIGHT,
+        n_jobs=-1,
+        random_state=RANDOM_STATE
+    )
+    rf.fit(X_trv, y_trv)
+    
+    # ---- Test predictions ----
+    y_pred   = rf.predict(X_test)
+    y_scores = rf.predict_proba(X_test)[:, 1]
+After choosing hyperparameters, you retrain on the combined train+val set to give the model more data. Then you produce class labels (predict) and probability scores (predict_proba) on the untouched test set for unbiased final evaluation.
+
+## Metrics summary and report
+    # ---- Summary metrics ----
+    acc   = accuracy_score(y_test, y_pred)
+    auc_v = roc_auc_score(y_test, y_scores)
+    f1    = f1_score(y_test, y_pred)
+    
+    cm = confusion_matrix(y_test, y_pred)
+    tn, fp, fn, tp = cm.ravel()
+    far = fp / float(fp + tn)           # False Alarm Rate
+    dr  = tp / float(tp + fn)           # Detection Rate (Recall for class 1)
+    
+    print("\n=== Random Forest Evaluation ===")
+    print(f"Accuracy                 = {acc:.6f}")
+    print(f"AUC                      = {auc_v:.6f}")
+    print(f"False Alarm Rate (FAR)   = {far:.6f}")
+    print(f"Detection Rate (DR)      = {dr:.6f}")
+    print(f"F1 Score                 = {f1:.5f}\n")
+    print(classification_report(y_test, y_pred, digits=2))
+You compute key metrics: Accuracy, ROC-AUC (using scores), F1, plus False Alarm Rate (FP rate on benign sites) and Detection Rate (recall on phishing). The classification_report prints precision/recall/F1 per class—handy for imbalance diagnostics.
