@@ -548,3 +548,29 @@ The confusion matrix shows counts, the ROC curve visualizes TPR vs FPR with AUC,
             best_f1, best_thr = f1_tmp, thr
     print(f"Best F1 across thresholds: {best_f1:.4f} at threshold {best_thr:.4f}")
 Instead of always using a 0.5 cutoff, you probe a range of thresholds and report the one that maximizes F1. Use this when you prefer a different precision–recall balance.
+
+# XGBoost
+## Imports, load data, train/test split
+    import numpy as np
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import (
+        accuracy_score, roc_auc_score, confusion_matrix, classification_report, f1_score,
+        roc_curve, auc, precision_recall_curve, average_precision_score
+    )
+    
+    import xgboost as xgb
+    print("XGBoost version:", xgb.__version__)
+    
+    FILE = "/content/drive/My Drive/Colab Notebooks/dataset_full_clean.csv"
+    df = pd.read_csv(FILE)
+    
+    X = df.drop("phishing", axis=1)
+    y = df["phishing"].astype(int)
+    
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.20, stratify=y, random_state=42
+    )
+You import libraries, print the XGBoost version for reproducibility, load the cleaned dataset, separate the features and labels, and create a stratified 80/20 train–test split to preserve the phishing ratio.
