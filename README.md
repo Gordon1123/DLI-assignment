@@ -371,7 +371,7 @@ You compute key metrics: Accuracy, ROC-AUC (using scores), F1, plus False Alarm 
     
 These plots let you see performance, not just numbers. The confusion matrix shows the TP/TN/FP/FN counts. ROC shows the trade-off between TPR and FPR with its AUC; the diagonal is random. The PR curve is especially useful when positives (phishing) are rarer; AP summarizes that curve.
 
-# Threshold sweep for best F1 + feature importances
+## Threshold sweep for best F1 + feature importances
     # ---- Best-F1 threshold search ----
     thr_candidates = np.linspace(np.percentile(y_scores, 5), np.percentile(y_scores, 95), 21)
     best_f1, best_thr = -1, 0.5
@@ -393,3 +393,66 @@ These plots let you see performance, not just numbers. The confusion matrix show
     plt.tight_layout()
     plt.show()
 Rather than always using a 0.5 cutoff, you thresholds (between the 5th–95th score percentiles) and report the one that maximizes F1—useful when you want a different precision/recall balance. Finally, the feature importance chart reveals which inputs the forest relied on most—great for interpretability and feature engineering.
+
+# PCA + Classifier Pipeline
+## Imports, config, and loading data
+    # ==========================
+    # PCA + KNN Pipeline (Full Evaluation & Graphs)
+    # ==========================
+    import numpy as np
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    
+    from sklearn.model_selection import train_test_split
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.decomposition import PCA
+    from sklearn.neighbors import KNeighborsClassifier
+    from sklearn.metrics import (
+        accuracy_score, roc_auc_score, confusion_matrix, classification_report, f1_score,
+        roc_curve, auc, precision_recall_curve, average_precision_score
+    )
+    
+    # ---- Config ----
+    FILE = "/content/drive/My Drive/Colab Notebooks/dataset_full_clean.csv"
+    TEST_SIZE = 0.20
+    VAL_SIZE_WITHIN_TRAIN = 0.20
+    RANDOM_STATE = 42
+    PCA_COMPONENTS = 30
+    K_LIST = [3, 5, 7, 9, 11]
+    WEIGHTS = "distance"
+    
+    # ---- Load dataset ----
+    df = pd.read_csv(FILE)
+    X = df.drop("phishing", axis=1)
+    y = df["phishing"].astype(int)
+You import all tools, set run-time knobs (file path, split sizes, PCA dimension, K values, weighting scheme), then load the cleaned data and split into features X and integer target y. Using weights="distance" lets nearer neighbors vote more strongly—often better after PCA.
+
+## Splits, scaling, and PCA
+    # ---- Split into train/test ----
+    X_train_full, X_test, y_train_full, y_test = train_test_split(
+        X, y, test_size=TEST_SIZE, stratify=y, random_state=RANDOM_STATE
+    )
+    
+    # ---- Split train into train/val ----
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_train_full, y_train_full,
+        test_size=VAL_SIZE_WITHIN_TRAIN,
+        stratify=y_train_full,
+        random_state=RANDOM_STATE
+    )
+    
+    # ---- Scale on train only; transform val & test ----
+    scaler = StandardScaler()
+    X_train_s = scaler.fit_transform(X_train)
+    X_val_s   = scaler.transform(X_val)
+    X_test_s  = scaler.transform(X_test)
+    
+    # ---- PCA on train only; transform val & test ----
+    pca = PCA(n_components=PCA_COMPONENTS, random_state=RANDOM_STATE)
+    X_train_p = pca.fit_transform(X_train_s)
+    X_val_p   = pca.transform(X_val_s)
+    X_test_p  = pca.transform(X_test_s)
+    
+    print(f"PCA reduced features: {X.shape[1]} -> {X_train_p.shape[1]}")
+    print(f"Total explained variance (sum): {pca.explained_variance_ratio_.sum():.4f}")
+You hold out 20% for test, then from the remaining data create a validation split for tuning. Standardization is essential for KNN distance calculations. PCA is fitted only on the standardized training set and applied to val/test, shrinking dimensionality to PCA_COMPONENTS and reporting the variance you kept—this speeds KNN and can reduce noise.
