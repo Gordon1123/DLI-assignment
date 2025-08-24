@@ -330,3 +330,66 @@ After choosing hyperparameters, you retrain on the combined train+val set to giv
     print(f"F1 Score                 = {f1:.5f}\n")
     print(classification_report(y_test, y_pred, digits=2))
 You compute key metrics: Accuracy, ROC-AUC (using scores), F1, plus False Alarm Rate (FP rate on benign sites) and Detection Rate (recall on phishing). The classification_report prints precision/recall/F1 per class—handy for imbalance diagnostics.
+
+## Visual diagnostics: Confusion Matrix, ROC, PR curves
+    # ---- Confusion Matrix (graph) ----
+    plt.figure(figsize=(6,4))
+    plt.imshow(cm, interpolation="nearest", cmap="Blues")
+    plt.title("Confusion Matrix (Random Forest)")
+    plt.xlabel("Predicted")
+    plt.ylabel("Actual")
+    for (i, j), v in np.ndenumerate(cm):
+        plt.text(j, i, str(v), ha="center", va="center")
+    plt.colorbar()
+    plt.tight_layout()
+    plt.show()
+    
+    # ---- ROC Curve ----
+    fpr, tpr, _ = roc_curve(y_test, y_scores)
+    roc_auc = auc(fpr, tpr)
+    plt.figure(figsize=(7,5))
+    plt.plot(fpr, tpr, label=f"AUC = {roc_auc:.4f}")
+    plt.plot([0,1],[0,1], "--")
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.title("ROC Curve (Random Forest)")
+    plt.legend(loc="lower right")
+    plt.tight_layout()
+    plt.show()
+    
+    # ---- Precision–Recall Curve ----
+    precision, recall, _ = precision_recall_curve(y_test, y_scores)
+    ap = average_precision_score(y_test, y_scores)
+    plt.figure(figsize=(7,5))
+    plt.plot(recall, precision, label=f"AP = {ap:.4f}")
+    plt.xlabel("Recall")
+    plt.ylabel("Precision")
+    plt.title("Precision–Recall Curve (Random Forest)")
+    plt.legend(loc="lower left")
+    plt.tight_layout()
+    plt.show()
+    
+These plots let you see performance, not just numbers. The confusion matrix shows the TP/TN/FP/FN counts. ROC shows the trade-off between TPR and FPR with its AUC; the diagonal is random. The PR curve is especially useful when positives (phishing) are rarer; AP summarizes that curve.
+
+# Threshold sweep for best F1 + feature importances
+    # ---- Best-F1 threshold search ----
+    thr_candidates = np.linspace(np.percentile(y_scores, 5), np.percentile(y_scores, 95), 21)
+    best_f1, best_thr = -1, 0.5
+    for thr in thr_candidates:
+        f1_tmp = f1_score(y_test, (y_scores >= thr).astype(int))
+        if f1_tmp > best_f1:
+            best_f1, best_thr = f1_tmp, thr
+    print(f"Best F1 across thresholds: {best_f1:.4f} at threshold {best_thr:.4f}")
+    
+    # ---- Top 20 Feature Importances ----
+    importances = rf.feature_importances_
+    feat_names = np.array(X.columns)
+    idx = np.argsort(importances)[::-1][:20]
+    plt.figure(figsize=(8,8))
+    plt.barh(range(len(idx)), importances[idx][::-1])
+    plt.yticks(range(len(idx)), feat_names[idx][::-1])
+    plt.title("Top 20 Feature Importances (Random Forest)")
+    plt.xlabel("Importance")
+    plt.tight_layout()
+    plt.show()
+Rather than always using a 0.5 cutoff, you thresholds (between the 5th–95th score percentiles) and report the one that maximizes F1—useful when you want a different precision/recall balance. Finally, the feature importance chart reveals which inputs the forest relied on most—great for interpretability and feature engineering.
