@@ -65,7 +65,7 @@ This block imports pandas plus the scikit-learn utilities you’ll use, then loa
     print("Testing set :", X_test.shape, y_test.shape)
 Here you define predictors X and the binary label y (column phishing), then split the data into training and test sets. stratify=y keeps the class ratio consistent across splits (important for phishing datasets). random_state=42 makes the split reproducible. The shape prints confirm the sizes.
 
-# Scale
+## Scale
     # ==========================
     # Feature Scaling
     # ==========================
