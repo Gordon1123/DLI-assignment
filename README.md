@@ -106,6 +106,7 @@ Standardization is learned only on training data (fit) and then applied to both 
     y = df['phishing'].values.astype(int)
 You import NumPy/pandas/matplotlib for data and plotting, scikit-learn for splitting, scaling, and metrics, and TensorFlow/Keras for the neural net. Then you load the cleaned CSV, split it into features X (all columns except phishing) and the binary target y (cast to int). Using the already-clean file avoids issues from NaNs/duplicates at the modeling stage.
 
+    
 ## Train/val/test split and scaling 
 
     # ---- Split: train/val/test = 64% / 16% / 20% ----
@@ -215,6 +216,28 @@ Predicted scores (probabilities) are thresholded at 0.5 to get class labels. You
     plt.xlabel("Recall"); plt.ylabel("Precision")
     plt.title("Precision–Recall Curve (NN)"); plt.legend(); plt.tight_layout(); plt.show()
 The confusion-matrix heatmap shows counts of TP/TN/FP/FN. The ROC curve plots TPR vs FPR with its AUC; the diagonal is random guessing. The Precision–Recall curve is especially informative for class imbalance; AP (Average Precision) summarizes area under the PR curve.
+
+    === Neural Network Evaluation ===
+    Accuracy                 = 0.961530
+    AUC                      = 0.992481
+    False Alarm Rate (FAR)   = 0.030503
+    Detection Rate (DR)      = 0.946713
+    F1 Score                 = 0.94509
+    
+                  precision    recall  f1-score   support
+    
+               0       0.97      0.97      0.97     11343
+               1       0.94      0.95      0.95      6099
+    
+        accuracy                           0.96     17442
+       macro avg       0.96      0.96      0.96     17442
+    weighted avg       0.96      0.96      0.96     17442
+
+<img width="401" height="284" alt="image" src="https://github.com/user-attachments/assets/0e367e2f-e566-48c7-bfc0-cf46c7da7a05" />
+
+<img width="541" height="357" alt="image" src="https://github.com/user-attachments/assets/fbb686b6-f564-45e2-96e0-a07440629e74" />
+
+<img width="538" height="355" alt="image" src="https://github.com/user-attachments/assets/73763121-7e3e-4f01-8ae7-68f8785c4ac1" />
 
 # Random Forest Algorithm (RF)
 ## Imports, config, and loading data
@@ -549,6 +572,22 @@ The confusion matrix shows counts, the ROC curve visualizes TPR vs FPR with AUC,
     print(f"Best F1 across thresholds: {best_f1:.4f} at threshold {best_thr:.4f}")
 Instead of always using a 0.5 cutoff, you probe a range of thresholds and report the one that maximizes F1. Use this when you prefer a different precision–recall balance.
 
+    === PCA + KNN Evaluation ===
+    Accuracy                 = 0.955395
+    AUC                      = 0.985151
+    False Alarm Rate (FAR)   = 0.031473
+    Detection Rate (DR)      = 0.930972
+    F1 Score                 = 0.93588
+    
+                  precision    recall  f1-score   support
+    
+               0       0.96      0.97      0.97     11343
+               1       0.94      0.93      0.94      6099
+    
+        accuracy                           0.96     17442
+       macro avg       0.95      0.95      0.95     17442
+    weighted avg       0.96      0.96      0.96     17442
+
 # XGBoost
 ## Imports, load data, train/test split
     import numpy as np
@@ -692,3 +731,18 @@ These plots visualize performance: the confusion matrix shows counts; the ROC sh
     else:
         print("No gain-based feature importance available.")
 You scan thresholds to find the one that maximizes F1, allowing you to tune the precision–recall trade-off; the gain-based importance chart highlights which features most improved splits, aiding interpretation and feature engineering.
+=== XGBoost (native) Evaluation ===
+Accuracy                 = 0.972194
+AUC                      = 0.995955
+False Alarm Rate (FAR)   = 0.025302
+Detection Rate (DR)      = 0.967536
+F1 Score                 = 0.96053
+
+              precision    recall  f1-score   support
+
+           0       0.98      0.97      0.98     11343
+           1       0.95      0.97      0.96      6099
+
+    accuracy                           0.97     17442
+   macro avg       0.97      0.97      0.97     17442
+weighted avg       0.97      0.97      0.97     17442
