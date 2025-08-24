@@ -1,3 +1,4 @@
+# Data Cleaning
 ## Setup and Load
 
     # Mount Google Drive
@@ -242,9 +243,6 @@ The confusion-matrix heatmap shows counts of TP/TN/FP/FN. The ROC curve plots TP
 # Random Forest Algorithm (RF)
 ## Imports, config, and loading data
 
-    # ==========================
-    # Random Forest (RF) — Full Pipeline (Val sweep + Graphs)
-    # ==========================
     import numpy as np
     import pandas as pd
     import matplotlib.pyplot as plt
@@ -252,171 +250,106 @@ The confusion-matrix heatmap shows counts of TP/TN/FP/FN. The ROC curve plots TP
     from sklearn.model_selection import train_test_split
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.metrics import (
-        accuracy_score, roc_auc_score, confusion_matrix, classification_report, f1_score,
+        accuracy_score, roc_auc_score, f1_score, confusion_matrix, classification_report,
         roc_curve, auc, precision_recall_curve, average_precision_score
     )
     
-    # ---- Config ----
     FILE = "/content/drive/My Drive/Colab Notebooks/dataset_full_clean.csv"
-    TEST_SIZE = 0.20
-    VAL_SIZE_WITHIN_TRAIN = 0.20     # 20% of the train portion becomes validation
-    RANDOM_STATE = 42
-    CLASS_WEIGHT = "balanced"        # helps with class imbalance
+    SHOW_PLOTS = True
     
-    # ---- Load ----
     df = pd.read_csv(FILE)
     X = df.drop("phishing", axis=1)
     y = df["phishing"].astype(int)
-You bring in NumPy/pandas/matplotlib, scikit-learn’s RF and metrics, and set run-time knobs (file path, split sizes, seed, and class_weight='balanced' to reduce class-imbalance bias). Then you load the cleaned dataset, split it into features X and integer target y (the phishing column).
-
-## Train/test split + internal validation split
-    # ---- Split into train/test ----
-    X_train_full, X_test, y_train_full, y_test = train_test_split(
-        X, y, test_size=TEST_SIZE, stratify=y, random_state=RANDOM_STATE
+    
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.20, stratify=y, random_state=42
     )
-    
-    # ---- Split train into train/val ----
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_train_full, y_train_full,
-        test_size=VAL_SIZE_WITHIN_TRAIN,
-        stratify=y_train_full,
-        random_state=RANDOM_STATE
-    )
-First you hold out a test set of 20% with stratification to preserve the class ratio. From the remaining training pool you carve out a validation set (20% of train), again stratified. That gives ~64% train, 16% validation, 20% test—clean separation for tuning (val) and final reporting (test).
-## Small validation sweep
 
-    # ---- Small validation sweep (optimize Average Precision on val) ----
-    param_grid = {
-        "n_estimators":     [200, 400, 600],
-        "max_depth":        [None, 12, 20],
-        "min_samples_leaf": [1, 3, 5],
-    }
-    
-    best = (-1.0, None, None)  # (AP, params, model)
-    for n in param_grid["n_estimators"]:
-        for d in param_grid["max_depth"]:
-            for m in param_grid["min_samples_leaf"]:
-                rf_val = RandomForestClassifier(
-                    n_estimators=n,
-                    max_depth=d,
-                    min_samples_leaf=m,
-                    class_weight=CLASS_WEIGHT,
-                    n_jobs=-1,
-                    random_state=RANDOM_STATE
-                )
-                rf_val.fit(X_train, y_train)
-                scores_val = rf_val.predict_proba(X_val)[:, 1]
-                ap_val = average_precision_score(y_val, scores_val)
-                print(f"n_estimators={n:4d} | max_depth={str(d):>4} | min_samples_leaf={m} -> Val AP={ap_val:.4f}")
-                if ap_val > best[0]:
-                    best = (ap_val, {"n_estimators": n, "max_depth": d, "min_samples_leaf": m}, rf_val)
-    
-    best_ap, best_params, _ = best
-    print(f"\nChosen params (by best validation AP={best_ap:.4f}): {best_params}")
-    
-You loop over a compact grid of RF hyperparameters and train on train, score on validation, and keep the combination that maximizes Average Precision (AP)—a PR-curve metric well-suited to imbalanced phishing data. This lightweight sweep avoids full grid-search overhead but still finds a good configuration.
+You load libraries and the cleaned dataset, separate features and the binary target, then make a stratified 80/20 split to keep the phishing ratio consistent across train and test. No scaling is needed for Random Forests, so you can train directly on X_train.
 
-## Refit with the best params on train+val and predict on test
-    # ---- Refit on Train+Val with best params ----
-    X_trv = pd.concat([X_train, X_val], axis=0)
-    y_trv = pd.concat([y_train, y_val], axis=0)
-    
+## Train Random Forest
     rf = RandomForestClassifier(
-        **best_params,
-        class_weight=CLASS_WEIGHT,
+        n_estimators=200,          
+        max_depth=14,              
+        min_samples_leaf=3,
+        class_weight="balanced_subsample",
         n_jobs=-1,
-        random_state=RANDOM_STATE
+        random_state=42
     )
-    rf.fit(X_trv, y_trv)
-    
-    # ---- Test predictions ----
+    rf.fit(X_train, y_train)
+
+This sets up a compact forest that trains quickly but generalizes well: a moderate number of trees, a depth cap, and a slightly larger leaf size to reduce overfitting. class_weight="balanced_subsample" rebalances classes per bootstrap sample, which is useful if phishing is the minority. n_jobs=-1 uses all cores.
+
+## Predict and compute key metrics
+
     y_pred   = rf.predict(X_test)
     y_scores = rf.predict_proba(X_test)[:, 1]
-After choosing hyperparameters, you retrain on the combined train+val set to give the model more data. Then you produce class labels (predict) and probability scores (predict_proba) on the untouched test set for unbiased final evaluation.
-
-## Metrics summary and report
-    # ---- Summary metrics ----
+    
     acc   = accuracy_score(y_test, y_pred)
     auc_v = roc_auc_score(y_test, y_scores)
     f1    = f1_score(y_test, y_pred)
+    tn, fp, fn, tp = confusion_matrix(y_test, y_pred).ravel()
+    far = fp / float(fp + tn)     # False Alarm Rate
+    dr  = tp / float(tp + fn)     # Detection Rate (recall for class 1)
     
-    cm = confusion_matrix(y_test, y_pred)
-    tn, fp, fn, tp = cm.ravel()
-    far = fp / float(fp + tn)           # False Alarm Rate
-    dr  = tp / float(tp + fn)           # Detection Rate (Recall for class 1)
-    
-    print("\n=== Random Forest Evaluation ===")
-    print(f"Accuracy                 = {acc:.6f}")
-    print(f"AUC                      = {auc_v:.6f}")
-    print(f"False Alarm Rate (FAR)   = {far:.6f}")
-    print(f"Detection Rate (DR)      = {dr:.6f}")
-    print(f"F1 Score                 = {f1:.5f}\n")
+    print("\n=== Random Forest ===")
+    print(f"Accuracy = {acc:.6f}")
+    print(f"AUC      = {auc_v:.6f}")
+    print(f"FAR      = {far:.6f}")
+    print(f"DR       = {dr:.6f}")
+    print(f"F1       = {f1:.5f}\n")
     print(classification_report(y_test, y_pred, digits=2))
-You compute key metrics: Accuracy, ROC-AUC (using scores), F1, plus False Alarm Rate (FP rate on benign sites) and Detection Rate (recall on phishing). The classification_report prints precision/recall/F1 per class—handy for imbalance diagnostics.
+   
+Predictions yield hard labels (predict) and probabilities (predict_proba). You report Accuracy, ROC-AUC (using scores), F1, plus False Alarm Rate on benigns and Detection Rate on phishing—giving both overall and class-specific performance. The classification report adds per-class precision/recall/F1 for imbalance diagnostics.
 
-## Visual diagnostics: Confusion Matrix, ROC, PR curves
-    # ---- Confusion Matrix (graph) ----
-    plt.figure(figsize=(6,4))
-    plt.imshow(cm, interpolation="nearest", cmap="Blues")
-    plt.title("Confusion Matrix (Random Forest)")
-    plt.xlabel("Predicted")
-    plt.ylabel("Actual")
-    for (i, j), v in np.ndenumerate(cm):
-        plt.text(j, i, str(v), ha="center", va="center")
-    plt.colorbar()
-    plt.tight_layout()
-    plt.show()
+## Optional plots for diagnostics
+    if SHOW_PLOTS:
+        # Confusion Matrix
+        cm = np.array([[tn, fp], [fn, tp]])
+        plt.figure(figsize=(6,4))
+        plt.imshow(cm, cmap="Blues")
+        for (i, j), v in np.ndenumerate(cm):
+            plt.text(j, i, str(v), ha="center", va="center")
+        plt.title("Confusion Matrix (RF)")
+        plt.xlabel("Predicted"); plt.ylabel("Actual")
+        plt.colorbar(); plt.tight_layout(); plt.show()
     
-    # ---- ROC Curve ----
-    fpr, tpr, _ = roc_curve(y_test, y_scores)
-    roc_auc = auc(fpr, tpr)
-    plt.figure(figsize=(7,5))
-    plt.plot(fpr, tpr, label=f"AUC = {roc_auc:.4f}")
-    plt.plot([0,1],[0,1], "--")
-    plt.xlabel("False Positive Rate")
-    plt.ylabel("True Positive Rate")
-    plt.title("ROC Curve (Random Forest)")
-    plt.legend(loc="lower right")
-    plt.tight_layout()
-    plt.show()
+        # ROC
+        fpr, tpr, _ = roc_curve(y_test, y_scores)
+        roc_auc = auc(fpr, tpr)
+        plt.figure(figsize=(7,5))
+        plt.plot(fpr, tpr, label=f"AUC = {roc_auc:.4f}")
+        plt.plot([0,1],[0,1], "--")
+        plt.xlabel("False Positive Rate"); plt.ylabel("True Positive Rate")
+        plt.title("ROC Curve (RF)")
+        plt.legend(); plt.tight_layout(); plt.show()
     
-    # ---- Precision–Recall Curve ----
-    precision, recall, _ = precision_recall_curve(y_test, y_scores)
-    ap = average_precision_score(y_test, y_scores)
-    plt.figure(figsize=(7,5))
-    plt.plot(recall, precision, label=f"AP = {ap:.4f}")
-    plt.xlabel("Recall")
-    plt.ylabel("Precision")
-    plt.title("Precision–Recall Curve (Random Forest)")
-    plt.legend(loc="lower left")
-    plt.tight_layout()
-    plt.show()
-    
-These plots let you see performance, not just numbers. The confusion matrix shows the TP/TN/FP/FN counts. ROC shows the trade-off between TPR and FPR with its AUC; the diagonal is random. The PR curve is especially useful when positives (phishing) are rarer; AP summarizes that curve.
+        # Precision–Recall
+        precision, recall, _ = precision_recall_curve(y_test, y_scores)
+        ap = average_precision_score(y_test, y_scores)
+        plt.figure(figsize=(7,5))
+        plt.plot(recall, precision, label=f"AP = {ap:.4f}")
+        plt.xlabel("Recall"); plt.ylabel("Precision")
+        plt.title("Precision–Recall (RF)")
+        plt.legend(); plt.tight_layout(); plt.show()
+These visuals help you understand where errors happen (confusion matrix), how the classifier trades off true and false positives (ROC), and performance on the positive class under imbalance (PR curve with Average Precision). Set SHOW_PLOTS=False if you only need metrics.
 
-## Threshold sweep for best F1 + feature importances
-    # ---- Best-F1 threshold search ----
-    thr_candidates = np.linspace(np.percentile(y_scores, 5), np.percentile(y_scores, 95), 21)
-    best_f1, best_thr = -1, 0.5
-    for thr in thr_candidates:
-        f1_tmp = f1_score(y_test, (y_scores >= thr).astype(int))
-        if f1_tmp > best_f1:
-            best_f1, best_thr = f1_tmp, thr
-    print(f"Best F1 across thresholds: {best_f1:.4f} at threshold {best_thr:.4f}")
+    === Random Forest ===
+    Accuracy = 0.954592
+    AUC      = 0.991854
+    FAR      = 0.049899
+    DR       = 0.962945
+    F1       = 0.93683
     
-    # ---- Top 20 Feature Importances ----
-    importances = rf.feature_importances_
-    feat_names = np.array(X.columns)
-    idx = np.argsort(importances)[::-1][:20]
-    plt.figure(figsize=(8,8))
-    plt.barh(range(len(idx)), importances[idx][::-1])
-    plt.yticks(range(len(idx)), feat_names[idx][::-1])
-    plt.title("Top 20 Feature Importances (Random Forest)")
-    plt.xlabel("Importance")
-    plt.tight_layout()
-    plt.show()
-Rather than always using a 0.5 cutoff, you thresholds (between the 5th–95th score percentiles) and report the one that maximizes F1—useful when you want a different precision/recall balance. Finally, the feature importance chart reveals which inputs the forest relied on most—great for interpretability and feature engineering.
-
+                  precision    recall  f1-score   support
+    
+               0       0.98      0.95      0.96     11343
+               1       0.91      0.96      0.94      6099
+    
+        accuracy                           0.95     17442
+       macro avg       0.95      0.96      0.95     17442
+    weighted avg       0.96      0.95      0.95     17442
+    
 # PCA + Classifier Pipeline
 ## Imports, config, and loading data
     # ==========================
@@ -731,18 +664,19 @@ These plots visualize performance: the confusion matrix shows counts; the ROC sh
     else:
         print("No gain-based feature importance available.")
 You scan thresholds to find the one that maximizes F1, allowing you to tune the precision–recall trade-off; the gain-based importance chart highlights which features most improved splits, aiding interpretation and feature engineering.
-=== XGBoost (native) Evaluation ===
-Accuracy                 = 0.972194
-AUC                      = 0.995955
-False Alarm Rate (FAR)   = 0.025302
-Detection Rate (DR)      = 0.967536
-F1 Score                 = 0.96053
 
-              precision    recall  f1-score   support
-
-           0       0.98      0.97      0.98     11343
-           1       0.95      0.97      0.96      6099
-
-    accuracy                           0.97     17442
-   macro avg       0.97      0.97      0.97     17442
-weighted avg       0.97      0.97      0.97     17442
+        === XGBoost (native) Evaluation ===
+        Accuracy                 = 0.972194
+        AUC                      = 0.995955
+        False Alarm Rate (FAR)   = 0.025302
+        Detection Rate (DR)      = 0.967536
+        F1 Score                 = 0.96053
+        
+                      precision    recall  f1-score   support
+        
+                   0       0.98      0.97      0.98     11343
+                   1       0.95      0.97      0.96      6099
+        
+            accuracy                           0.97     17442
+           macro avg       0.97      0.97      0.97     17442
+        weighted avg       0.97      0.97      0.97     17442
