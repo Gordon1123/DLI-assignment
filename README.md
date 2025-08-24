@@ -105,3 +105,22 @@ Standardization is learned only on training data (fit) and then applied to both 
     X = df.drop('phishing', axis=1).values
     y = df['phishing'].values.astype(int)
 You import NumPy/pandas/matplotlib for data and plotting, scikit-learn for splitting, scaling, and metrics, and TensorFlow/Keras for the neural net. Then you load the cleaned CSV, split it into features X (all columns except phishing) and the binary target y (cast to int). Using the already-clean file avoids issues from NaNs/duplicates at the modeling stage.
+
+# Train/val/test split and scaling 
+
+        # ---- Split: train/val/test = 64% / 16% / 20% ----
+        X_tmp, X_test, y_tmp, y_test = train_test_split(
+            X, y, test_size=0.20, stratify=y, random_state=42
+        )
+        X_train, X_val, y_train, y_val = train_test_split(
+            X_tmp, y_tmp, test_size=0.20, stratify=y_tmp, random_state=42
+        )
+        
+        # ---- Scale ----
+        scaler = StandardScaler()
+        X_train_s = scaler.fit_transform(X_train)
+        X_val_s   = scaler.transform(X_val)
+        X_test_s  = scaler.transform(X_test)
+
+You first hold out 20% as a test set, then split the remaining 80% into train/validation (80/20 of that), yielding 64% train / 16% val / 20% test. stratify preserves the phishing/non-phishing ratio in every split. StandardScaler is fitted only on the training data to prevent leakage, and then applied to validation and test.
+
