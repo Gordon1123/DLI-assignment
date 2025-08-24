@@ -12,7 +12,7 @@
     df = pd.read_csv(file_path)
 This mounts your Drive so Colab can access files, loads the pandas library, and reads dataset_full.csv into a DataFrame df. After this, your data lives in memory and is ready for cleaning and analysis.
 
-## Core Cleaning
+## Data Cleaning
     # Remove duplicates
     print("Duplicate rows before cleaning:", df.duplicated().sum())
     df_clean = df.drop_duplicates()
